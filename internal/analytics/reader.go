@@ -91,8 +91,7 @@ func (r *Reader) Start() error {
 		Parent:        r,
 	}
 
-	frameInterval := time.Second / time.Duration(r.FPS)
-	var lastEmit time.Time
+	throttle := newFPSThrottle(r.FPS)
 
 	r.streamReader.OnData(r.media, r.format, func(u *unit.Unit) error {
 		if u.NilPayload() {
@@ -111,29 +110,15 @@ func (r *Reader) Start() error {
 			}
 		}
 
-		// FPS throttle: keyframes always pass; P/B frames are dropped if
-		// they arrive sooner than 1/FPS after the last emitted frame.
-		// The decoder needs every keyframe to keep its reference state
-		// valid for subsequent P-frames.
-		if !isIDR {
-			now := u.NTP
-			if now.IsZero() {
-				now = time.Now()
-			}
-			if !lastEmit.IsZero() && now.Sub(lastEmit) < frameInterval {
-				return nil
-			}
-			lastEmit = now
-		} else {
-			lastEmit = u.NTP
-			if lastEmit.IsZero() {
-				lastEmit = time.Now()
-			}
-		}
-
 		ntp := u.NTP
 		if ntp.IsZero() {
 			ntp = time.Now()
+		}
+
+		// Keyframes always pass; the decoder needs every IDR to keep
+		// its reference state valid for subsequent P-frames.
+		if !throttle.shouldEmit(ntp, isIDR) {
+			return nil
 		}
 
 		// Copy the AU: the underlying NAL byte slices are owned by the
