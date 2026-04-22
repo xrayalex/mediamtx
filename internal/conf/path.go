@@ -312,6 +312,9 @@ type Path struct {
 	RunOnUnread                string   `json:"runOnUnread"`
 	RunOnRecordSegmentCreate   string   `json:"runOnRecordSegmentCreate"`
 	RunOnRecordSegmentComplete string   `json:"runOnRecordSegmentComplete"`
+
+	// Analytics
+	Analytics PathAnalyticsConf `json:"analytics"`
 }
 
 func (pconf *Path) setDefaults() {
@@ -865,6 +868,12 @@ func (pconf *Path) validate(
 
 	if (pconf.RunOnDemand != "" || pconf.RunOnUnDemand != "") && pconf.Source != "publisher" {
 		return fmt.Errorf("'runOnDemand' and 'runOnUnDemand' can be used only when source is 'publisher'")
+	}
+
+	// Analytics
+
+	if err := pconf.Analytics.validate(); err != nil {
+		return fmt.Errorf("analytics: %w", err)
 	}
 
 	return nil
