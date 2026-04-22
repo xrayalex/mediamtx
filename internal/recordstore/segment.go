@@ -152,10 +152,7 @@ func FindSegments(
 
 		if !info.IsDir() {
 			var pa Path
-			ok := pa.Decode(recordPath, fpath)
-
-			// gather all segments that start before the end of the playback
-			if ok && (end == nil || !end.Before(pa.Start)) {
+			if pa.Decode(recordPath, fpath) {
 				segments = append(segments, &Segment{
 					Fpath: fpath,
 					Start: pa.Start,
@@ -177,28 +174,43 @@ func FindSegments(
 		return segments[i].Start.Before(segments[j].Start)
 	})
 
-	if start != nil {
-		if start.Before(segments[0].Start) {
-			return segments, nil
+	// filter by overlap with [start, end].
+	// each segment is approximated to span from its Start to the next segment's Start;
+	// the last segment is treated as open-ended.
+	// fixes #4276 (start inside segment failed due to ms-level mismatch).
+	if start != nil || end != nil {
+		filtered := segments[:0]
+		for i, seg := range segments {
+			// segment must start at or before the end of the playback
+			if end != nil && end.Before(seg.Start) {
+				continue
+			}
+
+			// segment's approximate end must be after the start of the playback
+			if start != nil && i+1 < len(segments) && !segments[i+1].Start.After(*start) {
+				continue
+			}
+
+			filtered = append(filtered, seg)
 		}
 
-		// find the segment that may contain the start of the playback and remove all previous ones
-		found := false
-		for i := 0; i < len(segments)-1; i++ {
-			if !start.Before(segments[i].Start) && start.Before(segments[i+1].Start) {
-				segments = segments[i:]
-				found = true
-				break
+		// fixes #4164: when the requested range is entirely before any segment,
+		// return the first segment that starts at or after the requested start
+		// instead of an empty list, so callers can present "next available".
+		if len(filtered) == 0 && start != nil {
+			for _, seg := range segments {
+				if !seg.Start.Before(*start) {
+					filtered = append(filtered, seg)
+					break
+				}
 			}
 		}
 
-		// otherwise, keep the last segment only and check if it may contain the start of the playback
-		if !found {
-			segments = segments[len(segments)-1:]
-			if segments[len(segments)-1].Start.After(*start) {
-				return nil, ErrNoSegmentsFound
-			}
-		}
+		segments = filtered
+	}
+
+	if len(segments) == 0 {
+		return nil, ErrNoSegmentsFound
 	}
 
 	return segments, nil

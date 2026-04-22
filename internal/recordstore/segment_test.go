@@ -143,3 +143,144 @@ func TestFindSegments(t *testing.T) {
 		})
 	}
 }
+
+// fixes #4276: when start is inside a segment but does not match the
+// filename timestamp exactly (sub-second drift), the segment must still
+// be returned.
+func TestFindSegmentsStartMidSegment(t *testing.T) {
+	dir, err := os.MkdirTemp("", "mediamtx-recordstore")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	err = os.Mkdir(filepath.Join(dir, "path1"), 0o755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(dir, "path1", "2024-01-01_14-00-00-687000.mp4"), []byte{1}, 0o644)
+	require.NoError(t, err)
+
+	start := time.Date(2024, 1, 1, 14, 0, 0, 676000000, time.Local)
+	end := time.Date(2024, 1, 1, 14, 0, 0, 700000000, time.Local)
+
+	segments, err := FindSegments(
+		&conf.Path{
+			Name:         "~^.*$",
+			Regexp:       regexp.MustCompile("^.*$"),
+			RecordPath:   filepath.Join(dir, "%path/%Y-%m-%d_%H-%M-%S-%f"),
+			RecordFormat: conf.RecordFormatFMP4,
+		},
+		"path1",
+		&start,
+		&end,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []*Segment{
+		{
+			Fpath: filepath.Join(dir, "path1", "2024-01-01_14-00-00-687000.mp4"),
+			Start: time.Date(2024, 1, 1, 14, 0, 0, 687000000, time.Local),
+		},
+	}, segments)
+}
+
+// fixes #4164: when the requested range is entirely before any segment,
+// FindSegments should return the first available segment instead of
+// ErrNoSegmentsFound.
+func TestFindSegmentsStartBeforeFirst(t *testing.T) {
+	dir, err := os.MkdirTemp("", "mediamtx-recordstore")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	err = os.Mkdir(filepath.Join(dir, "path1"), 0o755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(dir, "path1", "2024-01-01_14-00-00-000000.mp4"), []byte{1}, 0o644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(dir, "path1", "2024-01-01_15-00-00-000000.mp4"), []byte{1}, 0o644)
+	require.NoError(t, err)
+
+	start := time.Date(2024, 1, 1, 10, 0, 0, 0, time.Local)
+	end := time.Date(2024, 1, 1, 11, 0, 0, 0, time.Local)
+
+	segments, err := FindSegments(
+		&conf.Path{
+			Name:         "~^.*$",
+			Regexp:       regexp.MustCompile("^.*$"),
+			RecordPath:   filepath.Join(dir, "%path/%Y-%m-%d_%H-%M-%S-%f"),
+			RecordFormat: conf.RecordFormatFMP4,
+		},
+		"path1",
+		&start,
+		&end,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []*Segment{
+		{
+			Fpath: filepath.Join(dir, "path1", "2024-01-01_14-00-00-000000.mp4"),
+			Start: time.Date(2024, 1, 1, 14, 0, 0, 0, time.Local),
+		},
+	}, segments)
+}
+
+// when start falls into a presumed gap between two segments,
+// the segment whose interval covers the gap is returned;
+// downstream filters can then drop it based on the actual file duration.
+func TestFindSegmentsStartInGap(t *testing.T) {
+	dir, err := os.MkdirTemp("", "mediamtx-recordstore")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	err = os.Mkdir(filepath.Join(dir, "path1"), 0o755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(dir, "path1", "2024-01-01_14-00-00-000000.mp4"), []byte{1}, 0o644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(dir, "path1", "2024-01-01_16-00-00-000000.mp4"), []byte{1}, 0o644)
+	require.NoError(t, err)
+
+	start := time.Date(2024, 1, 1, 15, 0, 0, 0, time.Local)
+	end := time.Date(2024, 1, 1, 15, 30, 0, 0, time.Local)
+
+	segments, err := FindSegments(
+		&conf.Path{
+			Name:         "~^.*$",
+			Regexp:       regexp.MustCompile("^.*$"),
+			RecordPath:   filepath.Join(dir, "%path/%Y-%m-%d_%H-%M-%S-%f"),
+			RecordFormat: conf.RecordFormatFMP4,
+		},
+		"path1",
+		&start,
+		&end,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []*Segment{
+		{
+			Fpath: filepath.Join(dir, "path1", "2024-01-01_14-00-00-000000.mp4"),
+			Start: time.Date(2024, 1, 1, 14, 0, 0, 0, time.Local),
+		},
+	}, segments)
+}
+
+// sanity: an empty directory yields ErrNoSegmentsFound.
+func TestFindSegmentsNoOverlapEmpty(t *testing.T) {
+	dir, err := os.MkdirTemp("", "mediamtx-recordstore")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	err = os.Mkdir(filepath.Join(dir, "path1"), 0o755)
+	require.NoError(t, err)
+
+	start := time.Date(2024, 1, 1, 14, 0, 0, 0, time.Local)
+
+	segments, err := FindSegments(
+		&conf.Path{
+			Name:         "~^.*$",
+			Regexp:       regexp.MustCompile("^.*$"),
+			RecordPath:   filepath.Join(dir, "%path/%Y-%m-%d_%H-%M-%S-%f"),
+			RecordFormat: conf.RecordFormatFMP4,
+		},
+		"path1",
+		&start,
+		nil,
+	)
+	require.ErrorIs(t, err, ErrNoSegmentsFound)
+	require.Nil(t, segments)
+}

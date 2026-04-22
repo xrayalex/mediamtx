@@ -215,7 +215,8 @@ func (s *Server) onList(ctx *gin.Context) {
 		// or when there's no second segment,
 		// the first segment is erroneously included with a negative duration.
 		// remove it.
-		if firstEntry.Start.Add(time.Duration(firstEntry.Duration)).Before(*start) {
+		// fixes #4128: also drop entries whose end coincides with start.
+		if !firstEntry.Start.Add(time.Duration(firstEntry.Duration)).After(*start) {
 			entries = entries[1:]
 
 			if len(entries) == 0 {
