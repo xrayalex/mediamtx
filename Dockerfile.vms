@@ -1,0 +1,27 @@
+FROM golang:1.25-alpine AS build
+RUN apk add --no-cache git make
+WORKDIR /s
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . ./
+ENV CGO_ENABLED=0
+# Only generate what the linux/amd64 build actually needs.
+# - versiongetter writes internal/core/VERSION (embedded into the binary).
+# - hlsjsdownloader fetches hls.js (embedded by internal/servers/hls).
+# rpicamera binaries are arm-only (camera_arm{32,64}_.go) and intentionally
+# skipped to keep the build hermetic and avoid flaky upstream downloads.
+RUN go generate ./internal/core/... ./internal/servers/hls/...
+# versiongetter appends "-dirty" whenever go-git reports the worktree as
+# not clean. On Windows hosts the file modes get rewritten on COPY into
+# the linux build stage, which makes go-git flag the worktree dirty even
+# though the host repo is clean. Strip the suffix here; the host CI is
+# responsible for ensuring the repo is actually clean before invoking
+# the build.
+RUN sed -i 's/-dirty$//' internal/core/VERSION
+RUN go build -o /mediamtx
+
+FROM alpine:3.22
+RUN apk add --no-cache ffmpeg
+COPY --from=build /mediamtx /mediamtx
+COPY --from=build /s/mediamtx.yml /mediamtx.yml
+ENTRYPOINT [ "/mediamtx" ]

@@ -6,3 +6,7 @@
 /internal/core/VERSION
 /internal/servers/hls/hls.min.js
 /internal/staticsources/rpicamera/mtxrpicam_*/
+
+# vms fork: keep IDE/dev files out of build context so version tag stays clean
+.idea/
+CLAUDE.md
