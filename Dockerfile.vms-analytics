@@ -1,0 +1,58 @@
+# mediamtx + analytics (LPR via PlateCore) image.
+#
+# Build stage uses debian bookworm + glibc because PlateCore is built
+# against glibc; alpine/musl will not load libCore.so.
+
+FROM golang:1.25-bookworm AS build
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git make pkg-config \
+        libavcodec-dev libavformat-dev libswscale-dev libavutil-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /s
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . ./
+
+ENV CGO_ENABLED=1
+ENV CGO_CFLAGS="-I/s/deploy/vendor/platecore/include"
+ENV CGO_LDFLAGS="-L/s/deploy/vendor/platecore/x86/lib -lCore -Wl,-rpath,/opt/platecore/lib"
+
+# Only generate what the linux/amd64 build actually needs.
+# rpicamera binaries are arm-only and intentionally skipped.
+RUN go generate ./internal/core/... ./internal/servers/hls/...
+
+# go-git inside versiongetter inspects file modes to decide cleanliness;
+# COPY into the linux build stage flips bits that go-git interprets as
+# modifications even when the host worktree is clean. Strip the
+# resulting "-dirty" so the image carries the real commit SHA.
+RUN sed -i 's/-dirty$//' internal/core/VERSION
+
+RUN go build -tags "analytics lpr" -o /mediamtx
+
+# ---------------------------------------------------------------------
+
+FROM debian:bookworm-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates ffmpeg bash \
+        libavcodec59 libavformat59 libswscale6 libavutil57 && \
+    rm -rf /var/lib/apt/lists/*
+
+# PlateCore native libraries: libCore.so + onnxruntime + cuda + models.
+# rpath in the binary points at /opt/platecore/lib so dlopen finds them.
+RUN mkdir -p /opt/platecore/lib
+COPY --from=build /s/deploy/vendor/platecore/x86/lib/ /opt/platecore/lib/
+COPY --from=build /s/deploy/vendor/platecore/license-server-manager_linux_amd64 \
+                  /opt/platecore/license-server-manager
+RUN chmod +x /opt/platecore/license-server-manager
+
+ENV LD_LIBRARY_PATH=/opt/platecore/lib
+
+COPY --from=build /mediamtx /mediamtx
+COPY --from=build /s/mediamtx.yml /mediamtx.yml
+COPY deploy/docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

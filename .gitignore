@@ -5,4 +5,9 @@
 /internal/core/VERSION
 /internal/servers/hls/hls.min.js
 /internal/staticsources/rpicamera/mtxrpicam_*/
-/deploy
+
+# Exclude only the native vendor drops, not the entire deploy/ tree:
+# Dockerfile snippets and entrypoint scripts under deploy/ ARE tracked.
+/deploy/vendor/platecore/x86/
+/deploy/vendor/platecore/arm64/
+/deploy/vendor/platecore/license-server-manager_*
