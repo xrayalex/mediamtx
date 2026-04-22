@@ -87,6 +87,7 @@ type pathManager struct {
 	wg        sync.WaitGroup
 	hlsServer *hls.Server
 	paths     map[string]*path
+	analytics pathManagerAnalytics
 
 	// in
 	chReloadConf      chan map[string]*conf.Path

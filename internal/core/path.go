@@ -94,6 +94,7 @@ type path struct {
 	source                         defs.Source
 	stream                         *stream.Stream
 	recorder                       *recorder.Recorder
+	analytics                      pathAnalytics
 	availableTime                  time.Time
 	onlineTime                     time.Time
 	onUnDemandHook                 func(string)
@@ -833,6 +834,8 @@ func (pa *path) setAvailable(
 		pa.startRecording()
 	}
 
+	pa.startAnalytics()
+
 	var sourceDesc *defs.APIPathSource
 	if source != nil {
 		sourceDesc = source.APISourceDescribe()
@@ -881,6 +884,8 @@ func (pa *path) setNotAvailable() {
 	}
 
 	pa.onNotReadyHook()
+
+	pa.stopAnalytics()
 
 	if pa.recorder != nil {
 		pa.recorder.Close()

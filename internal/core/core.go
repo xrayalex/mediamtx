@@ -125,6 +125,7 @@ type Core struct {
 	srtServer       *srt.Server
 	api             *api.API
 	confWatcher     *confwatcher.ConfWatcher
+	analytics       coreAnalytics
 
 	// in
 	chAPIConfigSet chan *conf.Conf
@@ -426,6 +427,8 @@ func (p *Core) createResources(initial bool) error {
 		p.playbackServer = i
 	}
 
+	p.startAnalyticsPublisher()
+
 	if p.pathManager == nil {
 		rtpMaxPayloadSize := getRTPMaxPayloadSize(p.conf.UDPMaxPayloadSize, p.conf.RTSPEncryption)
 
@@ -444,6 +447,7 @@ func (p *Core) createResources(initial bool) error {
 			metrics:           p.metrics,
 			parent:            p,
 		}
+		p.attachAnalyticsToPathManager(p.pathManager)
 		p.pathManager.initialize()
 	}
 
@@ -1052,6 +1056,10 @@ func (p *Core) closeResources(newConf *conf.Conf, calledByAPI bool) {
 
 	if closeAuthManager && p.authManager != nil {
 		p.authManager = nil
+	}
+
+	if newConf == nil {
+		p.stopAnalyticsPublisher()
 	}
 
 	if newConf == nil && p.externalCmdPool != nil {
