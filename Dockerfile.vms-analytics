@@ -7,7 +7,8 @@ FROM golang:1.25-bookworm AS build
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git make pkg-config \
-        libavcodec-dev libavformat-dev libswscale-dev libavutil-dev && \
+        libavcodec-dev libavformat-dev libswscale-dev libavutil-dev \
+        libavdevice-dev libavfilter-dev libswresample-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /s
@@ -37,7 +38,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates ffmpeg bash \
-        libavcodec59 libavformat59 libswscale6 libavutil57 && \
+        libavcodec59 libavformat59 libswscale6 libavutil57 \
+        libavdevice59 libavfilter8 libswresample4 && \
     rm -rf /var/lib/apt/lists/*
 
 # PlateCore native libraries: libCore.so + onnxruntime + cuda + models.

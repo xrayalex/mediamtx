@@ -9,6 +9,7 @@ require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0
 	github.com/abema/go-mp4 v1.5.0
 	github.com/alecthomas/kong v1.14.0
+	github.com/asticode/go-astiav v0.16.0
 	github.com/asticode/go-astits v1.15.0
 	github.com/bluenviron/gohlslib/v2 v2.2.9
 	github.com/bluenviron/gortmplib v0.3.1
@@ -28,7 +29,9 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/matthewhartstonge/argon2 v1.4.6
+	github.com/minio/minio-go/v7 v7.0.100
 	github.com/minio/selfupdate v0.6.0
+	github.com/nats-io/nats.go v1.51.0
 	github.com/pion/ice/v4 v4.2.2
 	github.com/pion/interceptor v0.1.44
 	github.com/pion/logging v0.2.4
@@ -48,7 +51,6 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
-	github.com/asticode/go-astiav v0.40.0 // indirect
 	github.com/asticode/go-astikit v0.42.0 // indirect
 	github.com/benburkert/openpgp v0.0.0-20160410205803-c2471f86866c // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
@@ -79,10 +81,8 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/minio/crc64nvme v1.1.1 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
-	github.com/minio/minio-go/v7 v7.0.100 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/nats-io/nats.go v1.51.0 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
