@@ -37,7 +37,7 @@ RUN go build -tags "analytics lpr" -o /mediamtx
 FROM debian:bookworm-slim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates ffmpeg bash \
+        ca-certificates ffmpeg bash wget curl\
         libavcodec59 libavformat59 libswscale6 libavutil57 \
         libavdevice59 libavfilter8 libswresample4 && \
     rm -rf /var/lib/apt/lists/*
