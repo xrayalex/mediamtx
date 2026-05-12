@@ -50,7 +50,7 @@ COPY --from=build /s/deploy/vendor/platecore/license-server-manager_linux_amd64 
                   /opt/platecore/license-server-manager
 RUN chmod +x /opt/platecore/license-server-manager
 
-ENV LD_LIBRARY_PATH=/opt/platecore/lib
+ENV LD_LIBRARY_PATH=/opt/platecore/lib:/opt/platecore/lib/cuda
 
 COPY --from=build /mediamtx /mediamtx
 COPY --from=build /s/mediamtx.yml /mediamtx.yml
