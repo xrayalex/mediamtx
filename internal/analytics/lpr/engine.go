@@ -208,16 +208,20 @@ func (e *Engine) Close() error {
 // Thumbnail is a JPEG-encoded image when crop or draw were requested
 // in Process(); otherwise nil.
 type Result struct {
-	TrackerID int
-	Plate     string
-	PlateFull string
-	Region    string
-	Country   string
-	Score     float32
-	BBox      [4]int
-	Width     int
-	Height    int
-	Thumbnail []byte
+	TrackerID   int
+	Plate       string
+	PlateFull   string
+	Region      string
+	Country     string
+	Score       float32
+	BBox        [4]int
+	Width       int
+	Height      int
+	DirectionLR int     // PlateCore raw: -1 stationary, 0 left, 1 right
+	DirectionUD int     // PlateCore raw: -1 stationary, 0 up, 1 down
+	Layout      int     // PlateCore raw: 0 rectangle, 1 square
+	Speed       float32 // PlateCore-reported speed, SDK-defined units
+	Thumbnail   []byte
 }
 
 // Process submits a BGR24 frame to PlateCore and returns the list of
@@ -292,9 +296,13 @@ func (e *Engine) Process(bgr []byte, width, height, timestamp, crop, draw int) (
 				int(ev.bbox[0]), int(ev.bbox[1]),
 				int(ev.bbox[2]), int(ev.bbox[3]),
 			},
-			Width:     int(ev.width),
-			Height:    int(ev.height),
-			Thumbnail: thumb,
+			Width:       int(ev.width),
+			Height:      int(ev.height),
+			DirectionLR: int(ev.direction_left_right),
+			DirectionUD: int(ev.direction_up_down),
+			Layout:      int(ev.layout),
+			Speed:       float32(ev.speed),
+			Thumbnail:   thumb,
 		})
 
 		// Pairs with the successful platecore_get_result_by_index above.

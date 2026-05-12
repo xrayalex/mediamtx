@@ -105,14 +105,19 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 			CameraID:   frame.CameraID,
 			TrackerID:  r.TrackerID,
 			Payload: EventPayload{
-				Plate:     r.Plate,
-				PlateFull: r.PlateFull,
-				Region:    r.Region,
-				Country:   r.Country,
-				Score:     r.Score,
-				BBox:      normaliseBBox(r.BBox, fw, fh),
-				Width:     r.Width,
-				Height:    r.Height,
+				Plate:       r.Plate,
+				PlateFull:   r.PlateFull,
+				Region:      r.Region,
+				Country:     r.Country,
+				Score:       r.Score,
+				BBox:        normaliseBBox(r.BBox, fw, fh),
+				Width:       r.Width,
+				Height:      r.Height,
+				Direction:   direction(r.DirectionLR, r.DirectionUD),
+				DirectionLR: r.DirectionLR,
+				DirectionUD: r.DirectionUD,
+				Layout:      layoutLabel(r.Layout),
+				Speed:       r.Speed,
 			},
 			Thumbnail: r.Thumbnail,
 		})
@@ -143,6 +148,51 @@ func normaliseBBox(bbox [4]int, fw, fh float32) [4]float32 {
 	w := float32(bbox[2]-bbox[0]) / fw
 	h := float32(bbox[3]-bbox[1]) / fh
 	return [4]float32{x, y, w, h}
+}
+
+// direction composes PlateCore's two axis ints
+// (direction_left_right, direction_up_down) into a single human-
+// readable label spanning the full 9-state grid: a cardinal/diagonal
+// vector plus "stationary". Per PlateCore SDK 1.2.2 docs each axis is
+// one of -1 (stationary), 0 (left/up), 1 (right/down). Any value
+// outside that set surfaces as "unknown" so consumers can detect SDK
+// drift without crashing.
+func direction(lr, ud int) string {
+	switch {
+	case lr == -1 && ud == -1:
+		return "stationary"
+	case lr == -1 && ud == 0:
+		return "up"
+	case lr == -1 && ud == 1:
+		return "down"
+	case lr == 0 && ud == -1:
+		return "left"
+	case lr == 0 && ud == 0:
+		return "up-left"
+	case lr == 0 && ud == 1:
+		return "down-left"
+	case lr == 1 && ud == -1:
+		return "right"
+	case lr == 1 && ud == 0:
+		return "up-right"
+	case lr == 1 && ud == 1:
+		return "down-right"
+	default:
+		return "unknown"
+	}
+}
+
+// layoutLabel translates PlateCore's layout int (0 = rectangle,
+// 1 = square) into a stable label.
+func layoutLabel(v int) string {
+	switch v {
+	case 0:
+		return "rectangle"
+	case 1:
+		return "square"
+	default:
+		return "unknown"
+	}
 }
 
 func parseMode(s string) (Mode, error) {
