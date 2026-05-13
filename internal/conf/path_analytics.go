@@ -17,6 +17,11 @@ type PathAnalyticsConf struct {
 	Enabled bool                  `json:"enabled"`
 	FPS     int                   `json:"fps"`
 	Modules []PathAnalyticsModule `json:"modules"`
+	// FrameBufferSize is the depth of the per-camera ring buffer that
+	// the analytics Reader maintains so async publish workers can
+	// fetch source frames after the decoder has reused its output
+	// buffer. 0 (or unset) -> engine default (16).
+	FrameBufferSize int `json:"frame_buffer_size"`
 }
 
 // PathAnalyticsModule selects one analytics module by name and carries its
@@ -57,6 +62,10 @@ func (c *PathAnalyticsConf) validate() error {
 	}
 	if c.FPS < 1 || c.FPS > 60 {
 		return fmt.Errorf("fps must be in [1, 60], got %d", c.FPS)
+	}
+
+	if c.FrameBufferSize < 0 || c.FrameBufferSize > 1024 {
+		return fmt.Errorf("frame_buffer_size must be in [0, 1024], got %d", c.FrameBufferSize)
 	}
 
 	if len(c.Modules) == 0 {

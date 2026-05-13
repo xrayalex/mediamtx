@@ -70,12 +70,13 @@ func (pa *path) startAnalytics() {
 	}
 
 	reader := &analytics.Reader{
-		Stream:   pa.stream,
-		CameraID: pa.name,
-		Modules:  modules,
-		FPS:      fps,
-		Pub:      pub,
-		Parent:   pa,
+		Stream:          pa.stream,
+		CameraID:        pa.name,
+		Modules:         modules,
+		FPS:             fps,
+		Pub:             pub,
+		Parent:          pa,
+		FrameBufferSize: pa.conf.Analytics.FrameBufferSize,
 	}
 	if err := reader.Start(); err != nil {
 		pa.Log(logger.Warn, "analytics reader start: %v", err)

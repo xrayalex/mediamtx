@@ -22,6 +22,16 @@ type Frame struct {
 	Height    int
 	Timestamp time.Time
 	CameraID  string
+
+	// Ref identifies the frame in the per-camera FrameStore. Modules
+	// may copy this value into Event.FrameRef so a late publisher
+	// goroutine can pull the original BGR bytes and encode a thumbnail
+	// off the decode goroutine.
+	//
+	// The zero value means the reader did not maintain a FrameStore.
+	Ref FrameRef
+	// Store is the FrameStore that issued Ref. nil iff Ref.IsZero().
+	Store *FrameStore
 }
 
 // Event is the result of a module recognising something in a Frame.
@@ -36,7 +46,22 @@ type Event struct {
 	CameraID   string
 	TrackerID  int
 	Payload    any
-	Thumbnail  []byte
+
+	// Thumbnail is an already-encoded JPEG to upload as-is. Modules
+	// that overlay bbox/text (LPR with draw=1) build it during
+	// Process; modules that just want a plain frame snapshot leave
+	// it nil and set FrameRef instead.
+	Thumbnail []byte
+
+	// FrameRef, when non-zero, points to a buffered frame from
+	// Frame.Store. The async publisher uses it to encode a default
+	// JPEG (without overlays) off the decode goroutine if Thumbnail
+	// is empty. Stale refs (frame already evicted) are logged and
+	// the event is published without a thumbnail.
+	FrameRef FrameRef
+	// FrameStore mirrors Frame.Store so the publisher can resolve
+	// FrameRef without separately threading the store through.
+	FrameStore *FrameStore
 }
 
 // Module is a single analytics processor (LPR, motion detector, ...).

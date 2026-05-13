@@ -32,17 +32,19 @@ type frameJob struct {
 // Process() to return before reading the next packet, so all modules
 // share a stable view of the decoder's reusable BGR buffer.
 type Reader struct {
-	Stream   *stream.Stream
-	CameraID string
-	Modules  []Module
-	FPS      int
-	Pub      *Publisher
-	Parent   logger.Writer
+	Stream          *stream.Stream
+	CameraID        string
+	Modules         []Module
+	FPS             int
+	Pub             *Publisher
+	Parent          logger.Writer
+	FrameBufferSize int
 
 	media        *description.Media
 	format       *rtspformat.H264
 	decoder      *Decoder
 	streamReader *stream.Reader
+	store        *FrameStore
 
 	jobs chan *frameJob
 
@@ -82,6 +84,12 @@ func (r *Reader) Start() error {
 	if err := r.decoder.Initialize(); err != nil {
 		return fmt.Errorf("init decoder: %w", err)
 	}
+
+	bufSize := r.FrameBufferSize
+	if bufSize <= 0 {
+		bufSize = defaultFrameBufferSize
+	}
+	r.store = NewFrameStore(bufSize)
 
 	r.jobs = make(chan *frameJob, 10)
 	r.closed = make(chan struct{})
@@ -238,12 +246,19 @@ func (r *Reader) handleJob(job *frameJob) {
 		return
 	}
 
+	// Snapshot the frame into the per-camera ring so async publish
+	// workers can fetch the BGR bytes after Module.Process has long
+	// returned and the decoder has reused its output buffer.
+	ref := r.store.Put(width, height, bgr, job.ntp)
+
 	frame := &Frame{
 		Data:      bgr,
 		Width:     width,
 		Height:    height,
 		Timestamp: job.ntp,
 		CameraID:  r.CameraID,
+		Ref:       ref,
+		Store:     r.store,
 	}
 
 	for _, m := range r.Modules {
@@ -257,9 +272,15 @@ func (r *Reader) handleJob(job *frameJob) {
 			continue
 		}
 		for i := range events {
-			if err := r.Pub.Publish(&events[i]); err != nil {
-				r.Log(logger.Warn, "analytics publish %q event for %s: %v",
-					m.Name(), r.CameraID, err)
+			// Auto-attach the store so modules only need to set
+			// FrameRef; the publisher resolves both together.
+			if !events[i].FrameRef.IsZero() && events[i].FrameStore == nil {
+				events[i].FrameStore = r.store
+			}
+			if !r.Pub.Enqueue(&events[i]) {
+				// Enqueue logs its own warning on first/Nth drop; we
+				// keep going so that other modules still publish.
+				continue
 			}
 		}
 	}

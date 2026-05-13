@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,11 @@ import (
 // best-effort: if NATS or MinIO are unreachable the call returns an
 // error and the caller is expected to leave Pub == nil so analytics
 // stays disabled until the operator restarts the process.
+//
+// All publishing is asynchronous: callers hand events to Enqueue
+// (non-blocking) and a small pool of worker goroutines does the
+// MinIO upload + NATS publish. This keeps the decode goroutine free
+// from the multi-millisecond network round-trips of each event.
 type Publisher struct {
 	Parent logger.Writer
 
@@ -39,16 +45,36 @@ type Publisher struct {
 	minioBucket string
 	minioSSL    bool
 
+	queue   chan publishJob
+	workers sync.WaitGroup
+	closed  chan struct{}
+
 	mu sync.Mutex
 	nc *nats.Conn
 	js nats.JetStreamContext
 	mc *minio.Client
+
+	droppedEnqueue atomic.Uint64
+	droppedEvicted atomic.Uint64
 }
 
 // thumbnailUploadTimeout caps how long we wait on a MinIO PutObject
 // before giving up: thumbnails are best-effort and must not stall the
 // fan-out goroutine.
 const thumbnailUploadTimeout = 3 * time.Second
+
+// defaultPublishQueueSize / defaultPublishWorkers tune the async
+// pipeline. Operators can override via env vars when high event
+// rates demand it.
+const (
+	defaultPublishQueueSize = 256
+	defaultPublishWorkers   = 4
+)
+
+// publishJob is the unit handed from Enqueue to a worker.
+type publishJob struct {
+	event *Event
+}
 
 // eventEnvelope is the JSON shape published to JetStream.
 type eventEnvelope struct {
@@ -61,12 +87,15 @@ type eventEnvelope struct {
 	ThumbnailKey string `json:"thumbnail_key,omitempty"`
 }
 
-// NewPublisher reads ANALYTICS_* env vars and connects to NATS + MinIO.
-//
-// Returns an error if either backend is unreachable; callers should log
-// and treat analytics as disabled in that case.
+// NewPublisher reads ANALYTICS_* env vars, connects to NATS + MinIO,
+// and starts the worker pool. Returns an error if either backend is
+// unreachable; callers should log and treat analytics as disabled.
 func NewPublisher(parent logger.Writer) (*Publisher, error) {
 	useSSL, _ := strconv.ParseBool(envOr("ANALYTICS_MINIO_USE_SSL", "false"))
+
+	queueSize := envInt("ANALYTICS_PUBLISH_QUEUE_SIZE", defaultPublishQueueSize)
+	workerCount := envInt("ANALYTICS_PUBLISH_WORKERS", defaultPublishWorkers)
+
 	p := &Publisher{
 		Parent:      parent,
 		natsURL:     envOr("ANALYTICS_NATS_URL", "nats://nats:4222"),
@@ -77,6 +106,8 @@ func NewPublisher(parent logger.Writer) (*Publisher, error) {
 		minioSecret: envOr("ANALYTICS_MINIO_SECRET_KEY", ""),
 		minioBucket: envOr("ANALYTICS_MINIO_BUCKET", "lpr-thumbnails"),
 		minioSSL:    useSSL,
+		queue:       make(chan publishJob, queueSize),
+		closed:      make(chan struct{}),
 	}
 
 	if err := p.dialNATS(); err != nil {
@@ -88,8 +119,14 @@ func NewPublisher(parent logger.Writer) (*Publisher, error) {
 		return nil, fmt.Errorf("connect MinIO: %w", err)
 	}
 
-	p.log(logger.Info, "publisher connected (nats=%s, minio=%s, bucket=%s)",
-		p.natsURL, p.minioEnd, p.minioBucket)
+	for i := 0; i < workerCount; i++ {
+		p.workers.Add(1)
+		go p.runWorker()
+	}
+
+	p.log(logger.Info,
+		"publisher connected (nats=%s, minio=%s, bucket=%s, workers=%d, queue=%d)",
+		p.natsURL, p.minioEnd, p.minioBucket, workerCount, queueSize)
 
 	return p, nil
 }
@@ -145,30 +182,144 @@ func (p *Publisher) dialMinIO() error {
 	return nil
 }
 
-// Close closes the NATS connection. The MinIO client has no Close.
+// Close stops the worker pool, drains the queue best-effort, and
+// closes the NATS connection. Safe to call multiple times; subsequent
+// calls are no-ops.
+//
+// We deliberately do NOT close p.queue: workers exit on p.closed and
+// drain any in-flight jobs in their own select, which avoids racing
+// with a concurrent Enqueue (sending on a closed channel panics).
 func (p *Publisher) Close() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	select {
+	case <-p.closed:
+		p.mu.Unlock()
+		return
+	default:
+	}
+	close(p.closed)
+	p.mu.Unlock()
+
+	p.workers.Wait()
+
+	p.mu.Lock()
 	if p.nc != nil {
 		p.nc.Close()
 		p.nc = nil
 	}
+	p.mu.Unlock()
 }
 
-// Publish uploads the thumbnail (if present) and publishes the event
-// envelope to subject "{module}.events.{camera_path}". A failed
-// thumbnail upload is logged but does not abort the publish; a failed
-// JetStream publish is returned to the caller.
-func (p *Publisher) Publish(event *Event) error {
+// Enqueue hands an event to the async worker pool. Non-blocking:
+// when the queue is full the event is dropped and a counter is
+// incremented so the operator can spot saturation.
+//
+// Returns false if the publisher is closed or the queue was full.
+func (p *Publisher) Enqueue(event *Event) bool {
 	if event == nil {
-		return errors.New("nil event")
+		return false
+	}
+	select {
+	case <-p.closed:
+		return false
+	default:
 	}
 
+	job := publishJob{event: event}
+	select {
+	case p.queue <- job:
+		return true
+	case <-p.closed:
+		return false
+	default:
+		n := p.droppedEnqueue.Add(1)
+		// Log only the first few drops so we do not flood at very
+		// high event rates; operators can read the counter via
+		// DroppedCounters when triaging saturation.
+		if n <= 5 || n%100 == 0 {
+			p.log(logger.Warn,
+				"publish queue full, dropping event (total dropped=%d)", n)
+		}
+		return false
+	}
+}
+
+// DroppedCounters returns the running totals of events lost because
+// the queue was full or because the referenced frame had already
+// been evicted from the FrameStore. Exposed mainly for tests and
+// future /metrics integration.
+func (p *Publisher) DroppedCounters() (queueFull, frameEvicted uint64) {
+	return p.droppedEnqueue.Load(), p.droppedEvicted.Load()
+}
+
+func (p *Publisher) runWorker() {
+	defer p.workers.Done()
+	for {
+		select {
+		case <-p.closed:
+			// Drain anything queued before Close. We do this best-
+			// effort: NATS is still open until Close returns from
+			// the wait, so handle() can finish publishing.
+			for {
+				select {
+				case job := <-p.queue:
+					p.handle(job)
+				default:
+					return
+				}
+			}
+		case job := <-p.queue:
+			p.handle(job)
+		}
+	}
+}
+
+func (p *Publisher) handle(job publishJob) {
+	ev := job.event
+	if ev == nil {
+		return
+	}
+
+	// If the module did not pre-build a thumbnail but pointed us at a
+	// buffered frame, render a plain JPEG here. Stale refs (frame
+	// already overwritten in the ring) just leave the envelope
+	// without a thumbnail_key — better than blocking the worker.
+	if len(ev.Thumbnail) == 0 && !ev.FrameRef.IsZero() && ev.FrameStore != nil {
+		if stored, ok := ev.FrameStore.Get(ev.FrameRef); ok {
+			if jpg, err := encodeBGRJPEG(stored); err == nil {
+				ev.Thumbnail = jpg
+			} else {
+				p.log(logger.Warn,
+					"encode jpeg for event (module=%s, camera=%s): %v",
+					ev.ModuleName, ev.CameraID, err)
+			}
+		} else {
+			n := p.droppedEvicted.Add(1)
+			if n <= 5 || n%100 == 0 {
+				p.log(logger.Warn,
+					"frame evicted before publish (module=%s, camera=%s, total=%d)",
+					ev.ModuleName, ev.CameraID, n)
+			}
+		}
+	}
+
+	if err := p.publishOne(ev); err != nil {
+		p.log(logger.Warn,
+			"publish event (module=%s, camera=%s): %v",
+			ev.ModuleName, ev.CameraID, err)
+	}
+}
+
+// publishOne uploads the thumbnail (if present) and publishes the
+// event envelope to subject "{module}.events.{camera_path}". A failed
+// thumbnail upload is logged but does not abort the publish; a failed
+// JetStream publish is returned to the caller.
+func (p *Publisher) publishOne(event *Event) error {
 	id, err := uuid.NewV7()
 	if err != nil {
 		// uuid.NewV7 returns an error only on entropy failure, which
-		// would be catastrophic; fall back to v4 so we don't lose the
-		// event over a one-off RNG hiccup.
+		// would be catastrophic; fall back to v4 so we do not lose
+		// the event over a one-off RNG hiccup.
 		id = uuid.New()
 	}
 
@@ -240,4 +391,18 @@ func sanitizeSubjectToken(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// envInt returns the integer value of the env var named key, or
+// fallback if unset / unparseable / non-positive.
+func envInt(key string, fallback int) int {
+	v := envOr(key, "")
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
