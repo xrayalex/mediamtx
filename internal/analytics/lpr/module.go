@@ -120,6 +120,11 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 				Speed:       r.Speed,
 			},
 			Thumbnail: r.Thumbnail,
+			// FrameRef lets the publisher fall back to a plain JPEG of
+			// the source frame when the LPR module did not build its
+			// own (crop=0 && draw=0). For events where Thumbnail is
+			// already populated, the publisher leaves the ref alone.
+			FrameRef: frame.Ref,
 		})
 	}
 
