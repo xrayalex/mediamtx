@@ -79,10 +79,17 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 		return nil, nil
 	}
 
-	// PlateCore's tracker only uses the timestamp as a monotonic key;
-	// microseconds give us enough resolution to keep monotonicity even
-	// when multiple frames arrive in the same millisecond.
-	ts := int(frame.Timestamp.UnixMicro())
+	// We pass the ring-buffer frame ID as the PlateCore "timestamp" so
+	// PlateCore echoes it back via processing_result.timestamp. That
+	// echoed value tells us *which source frame* the bbox refers to —
+	// which in stream=1 can be several iterations behind the most
+	// recent submission because the tracker accumulates detections
+	// before firing the event. We then key FrameRef off it to fetch
+	// the matching BGR from the ring on the publisher worker.
+	//
+	// The low 31 bits are enough headroom (frame IDs wrap after 2^31
+	// frames; at 10 fps that is ~6.8 years per camera).
+	ts := int(frame.Ref.ID & 0x7fffffff)
 
 	results, err := m.engine.Process(
 		frame.Data, frame.Width, frame.Height, ts, m.cfg.Crop, m.cfg.Draw,
@@ -99,6 +106,15 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 
 	events := make([]analytics.Event, 0, len(results))
 	for _, r := range results {
+		// sourceRef is the ring-buffer handle of the *frame the bbox
+		// refers to*, not the current submission. We derive it from
+		// r.Timestamp (PlateCore's echo of our input timestamp).
+		// MODE_LEAVE returns timestamp = the best frame in the track,
+		// which is usually older than ring depth — in that case the
+		// publisher's Get will report eviction and Thumbnail
+		// (populated via platecore_to_jpeg) wins anyway.
+		sourceRef := analytics.FrameRef{ID: r.Timestamp}
+
 		ev := analytics.Event{
 			ModuleName: "lpr",
 			DetectedAt: frame.Timestamp,
@@ -120,7 +136,7 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 				Speed:       r.Speed,
 			},
 			Thumbnail: r.Thumbnail,
-			FrameRef:  frame.Ref,
+			FrameRef:  sourceRef,
 		}
 
 		// r.Thumbnail is only populated in MODE_LEAVE + stream=1 (where

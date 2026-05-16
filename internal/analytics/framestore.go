@@ -8,10 +8,17 @@ import (
 )
 
 // defaultFrameBufferSize is the per-camera ring depth used when the
-// path config does not override it. Sized for ~1.6s of buffered frames
-// at the default 10 fps analytics tap — enough headroom to absorb
-// publisher hiccups without ballooning per-camera memory.
-const defaultFrameBufferSize = 16
+// path config does not override it. Sized for ~6.4s of buffered
+// frames at the default 10 fps analytics tap.
+//
+// The window has to cover the PlateCore tracker's accumulation
+// horizon for non-LEAVE modes: a result's bbox/timestamp can refer
+// to a source frame that is min_hits frames old for ENTER_ONCE, or
+// up to repeat_event seconds old for ENTER_INTERVAL. Defaults
+// (min_hits=3, repeat_event=5s) fit comfortably inside 6.4s; raise
+// frame_buffer_size in the path config when running with larger
+// intervals.
+const defaultFrameBufferSize = 64
 
 // FrameRef is a stable, copyable handle to a frame that lived in a
 // FrameStore at one point. The zero value means "no reference".

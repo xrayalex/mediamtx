@@ -207,6 +207,14 @@ func (e *Engine) Close() error {
 //
 // Thumbnail is a JPEG-encoded image when crop or draw were requested
 // in Process(); otherwise nil.
+//
+// Timestamp is the raw uint64 PlateCore copied back into the result.
+// In stream=1 the value is the input timestamp of the *source frame*
+// the bbox refers to — which can be several frames behind the most
+// recently submitted one because the tracker accumulates detections
+// across iterations before firing the event. Callers that need to
+// re-fetch the source frame from a ring buffer should key off this
+// value, not the current frame's id.
 type Result struct {
 	TrackerID   int
 	Plate       string
@@ -221,6 +229,7 @@ type Result struct {
 	DirectionUD int     // PlateCore raw: -1 stationary, 0 up, 1 down
 	Layout      int     // PlateCore raw: 0 rectangle, 1 square
 	Speed       float32 // PlateCore-reported speed, SDK-defined units
+	Timestamp   uint64  // input timestamp echoed back for the source frame of bbox
 	Thumbnail   []byte
 }
 
@@ -309,6 +318,7 @@ func (e *Engine) Process(bgr []byte, width, height, timestamp, crop, draw int) (
 			DirectionUD: int(ev.direction_up_down),
 			Layout:      int(ev.layout),
 			Speed:       float32(ev.speed),
+			Timestamp:   uint64(ev.timestamp),
 			Thumbnail:   thumb,
 		})
 
