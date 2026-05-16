@@ -276,19 +276,14 @@ func (e *Engine) Process(bgr []byte, width, height, timestamp, crop, draw int) (
 		}
 
 		var thumb []byte
-		if crop != 0 || draw != 0 {
-			// In MODE_LEAVE + stream=1 PlateCore fills ev.frame with a
-			// pointer to its own best-frame buffer; in every other mode
-			// (MODE_ENTER_*, stream=0) it leaves ev.frame == NULL and
-			// platecore_to_jpeg has nothing to draw on. The fix per SDK
-			// 1.2.2 docs is to point ev.frame at the current BGR buffer
-			// before calling to_jpeg.
-			if ev.frame == nil {
-				ev.frame = unsafe.Pointer(&bgr[0])
-				ev.width = C.int(width)
-				ev.height = C.int(height)
-				ev.format = C.PIX_FMT_BGR
-			}
+		// Only call platecore_to_jpeg when PlateCore actually has an
+		// internal best-frame buffer to draw on — that is, MODE_LEAVE
+		// with stream=1, where ev.frame points at PlateCore's own
+		// snapshot. In every other mode (MODE_ENTER_*, stream=0)
+		// ev.frame is NULL and the caller is expected to build the
+		// thumbnail itself from a ring-buffered source frame on the
+		// publisher goroutine, off the decode loop.
+		if (crop != 0 || draw != 0) && ev.frame != nil {
 			var buf C.jpeg_buffer
 			jr := C.platecore_to_jpeg(&ev, &buf, C.int(crop), C.int(draw))
 			if jr == retOK && buf.buffer != nil && buf.size > 0 {

@@ -99,7 +99,7 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 
 	events := make([]analytics.Event, 0, len(results))
 	for _, r := range results {
-		events = append(events, analytics.Event{
+		ev := analytics.Event{
 			ModuleName: "lpr",
 			DetectedAt: frame.Timestamp,
 			CameraID:   frame.CameraID,
@@ -120,12 +120,26 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 				Speed:       r.Speed,
 			},
 			Thumbnail: r.Thumbnail,
-			// FrameRef lets the publisher fall back to a plain JPEG of
-			// the source frame when the LPR module did not build its
-			// own (crop=0 && draw=0). For events where Thumbnail is
-			// already populated, the publisher leaves the ref alone.
-			FrameRef: frame.Ref,
-		})
+			FrameRef:  frame.Ref,
+		}
+
+		// r.Thumbnail is only populated in MODE_LEAVE + stream=1 (where
+		// platecore_to_jpeg has an internal best-frame buffer to draw
+		// on). In every other mode we hand the job to the publisher
+		// worker: it fetches the source frame from the ring buffer,
+		// applies the bbox/crop we asked for, encodes a JPEG, and
+		// uploads — all off the decode goroutine.
+		if r.Thumbnail == nil {
+			if m.cfg.Draw != 0 {
+				ev.Overlays = []analytics.Overlay{{BBox: r.BBox}}
+			}
+			if m.cfg.Crop != 0 {
+				bbox := r.BBox
+				ev.CropRegion = &bbox
+			}
+		}
+
+		events = append(events, ev)
 	}
 
 	return events, nil

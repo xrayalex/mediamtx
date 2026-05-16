@@ -48,20 +48,44 @@ type Event struct {
 	Payload    any
 
 	// Thumbnail is an already-encoded JPEG to upload as-is. Modules
-	// that overlay bbox/text (LPR with draw=1) build it during
-	// Process; modules that just want a plain frame snapshot leave
-	// it nil and set FrameRef instead.
+	// only set this when they cannot defer the work to the publisher
+	// (e.g. LPR in MODE_LEAVE uses platecore_to_jpeg because the
+	// best-frame buffer lives in PlateCore and is gone after the
+	// release call). The typical, preferred path leaves Thumbnail
+	// nil and lets the publisher worker build the JPEG from a ring-
+	// buffered source frame.
 	Thumbnail []byte
 
 	// FrameRef, when non-zero, points to a buffered frame from
-	// Frame.Store. The async publisher uses it to encode a default
-	// JPEG (without overlays) off the decode goroutine if Thumbnail
-	// is empty. Stale refs (frame already evicted) are logged and
+	// Frame.Store. The async publisher fetches that frame, applies
+	// Overlays / CropRegion, and encodes the JPEG off the decode
+	// goroutine. Stale refs (frame already evicted) are logged and
 	// the event is published without a thumbnail.
 	FrameRef FrameRef
 	// FrameStore mirrors Frame.Store so the publisher can resolve
-	// FrameRef without separately threading the store through.
+	// FrameRef without separately threading the store through. The
+	// Reader auto-fills this when a module sets FrameRef.
 	FrameStore *FrameStore
+
+	// Overlays are drawn on the fetched frame in source-coordinate
+	// space before any cropping. Empty = no overlay. Used by modules
+	// to annotate detected regions (LPR plate bbox, motion area,
+	// etc.) without doing the JPEG work themselves.
+	Overlays []Overlay
+	// CropRegion, when non-nil, makes the publisher encode only the
+	// rectangular subregion of the source frame (pixel-space). Set
+	// from modules like LPR that want a tight crop around the
+	// detection instead of the full camera view.
+	CropRegion *[4]int
+}
+
+// Overlay is a graphic annotation rendered on a source frame before
+// JPEG encoding. The zero Color falls back to green; non-positive
+// Thickness falls back to 2 pixels.
+type Overlay struct {
+	BBox      [4]int   // pixel-space [xmin, ymin, xmax, ymax]
+	Color     [3]uint8 // RGB
+	Thickness int      // outline width, in pixels
 }
 
 // Module is a single analytics processor (LPR, motion detector, ...).

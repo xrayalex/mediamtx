@@ -281,24 +281,36 @@ func (p *Publisher) handle(job publishJob) {
 	}
 
 	// If the module did not pre-build a thumbnail but pointed us at a
-	// buffered frame, render a plain JPEG here. Stale refs (frame
-	// already overwritten in the ring) just leave the envelope
-	// without a thumbnail_key — better than blocking the worker.
+	// buffered frame, render the JPEG here off the decode goroutine.
+	// Apply overlays first (they live in source-coordinate space),
+	// then crop, then encode. Stale refs (frame already overwritten
+	// in the ring) just leave the envelope without a thumbnail_key —
+	// better than blocking the worker.
 	if len(ev.Thumbnail) == 0 && !ev.FrameRef.IsZero() && ev.FrameStore != nil {
-		if stored, ok := ev.FrameStore.Get(ev.FrameRef); ok {
+		stored, ok := ev.FrameStore.Get(ev.FrameRef)
+		if !ok {
+			n := p.droppedEvicted.Add(1)
+			if n <= 5 || n%100 == 0 {
+				p.log(logger.Warn,
+					"frame evicted before publish (module=%s, camera=%s, total=%d)",
+					ev.ModuleName, ev.CameraID, n)
+			}
+		} else {
+			for _, ov := range ev.Overlays {
+				drawBBoxBGR(stored.Data, stored.Width, stored.Height,
+					ov.BBox, ov.Color, ov.Thickness)
+			}
+			if ev.CropRegion != nil {
+				if cropped := cropBGR(stored, *ev.CropRegion); cropped != nil {
+					stored = cropped
+				}
+			}
 			if jpg, err := encodeBGRJPEG(stored); err == nil {
 				ev.Thumbnail = jpg
 			} else {
 				p.log(logger.Warn,
 					"encode jpeg for event (module=%s, camera=%s): %v",
 					ev.ModuleName, ev.CameraID, err)
-			}
-		} else {
-			n := p.droppedEvicted.Add(1)
-			if n <= 5 || n%100 == 0 {
-				p.log(logger.Warn,
-					"frame evicted before publish (module=%s, camera=%s, total=%d)",
-					ev.ModuleName, ev.CameraID, n)
 			}
 		}
 	}
