@@ -33,6 +33,7 @@ func (m *Module) Configure(cameraID string, raw json.RawMessage) error {
 		RepeatEvent: 5,
 		TTL:         60,
 		Stream:      1,
+		GPU:         -1, // safe default: CPU. Set "gpu": 0 explicitly to opt into CUDA.
 	}
 
 	if len(raw) > 0 {
@@ -59,6 +60,7 @@ func (m *Module) Configure(cameraID string, raw json.RawMessage) error {
 		RepeatEvent:  cfg.RepeatEvent,
 		TTL:          cfg.TTL,
 		Stream:       cfg.Stream,
+		GPU:          cfg.GPU,
 		PlateType:    plateType,
 	})
 	if err != nil {

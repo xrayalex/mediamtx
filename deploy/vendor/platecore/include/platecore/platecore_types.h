@@ -48,7 +48,7 @@ extern "C" {
         int direction_left_right; // 0 - left, 1 - right , -1  - stationary
         int direction_up_down; // 0 - up, 1 - down , -1  - stationary
         int layout; // 0 - rectangle, 1-square
-        float speed;
+        float speed; // средняя скорость объекта в км/ч (0 — недостоверно/недостаточно данных)
         //Frame info
         uint64_t timestamp;
         void* frame;
@@ -71,6 +71,8 @@ extern "C" {
         int ttl = 60; // Время жизни номера, после сброса если номер будет в кадре , создаст событие.
         //STREAM PARAM
         int stream = 1; // 0 - Режим кадра , в данном режиме отключается трекер и (min_hits=1 и mode=0) для работы с изображением. 1 - Режим потока.
+        //DEVICE PARAM
+        int gpu = 0; // -1 — CPU, 0..N — индекс GPU для CUDA (только PLATFORM_X86). На PLATFORM_RK игнорируется.
 
 
     } plate_core_init_arg;

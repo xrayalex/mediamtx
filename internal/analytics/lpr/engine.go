@@ -50,6 +50,7 @@ typedef struct {
     int repeat_event;
     int ttl;
     int stream;
+    int gpu; // -1 = CPU, 0..N = CUDA device index (x86 only; ignored on PLATFORM_RK).
 } plate_core_init_arg;
 
 typedef struct {
@@ -128,6 +129,10 @@ const (
 
 // EngineConfig is the Go-side mirror of PlateCore's plate_core_init_arg
 // plus the plate_type passed to platecore_init.
+//
+// GPU mirrors the SDK's device selector: -1 forces CPU, 0..N selects
+// a CUDA device on PLATFORM_X86 builds, ignored on PLATFORM_RK (NPU is
+// always used there).
 type EngineConfig struct {
 	ROIRect      [4]float32
 	PlateSizeMin [2]float32
@@ -137,6 +142,7 @@ type EngineConfig struct {
 	RepeatEvent  int
 	TTL          int
 	Stream       int
+	GPU          int
 	PlateType    PlateType
 }
 
@@ -364,5 +370,6 @@ func configToArg(cfg EngineConfig) C.plate_core_init_arg {
 	arg.repeat_event = C.int(cfg.RepeatEvent)
 	arg.ttl = C.int(cfg.TTL)
 	arg.stream = C.int(cfg.Stream)
+	arg.gpu = C.int(cfg.GPU)
 	return arg
 }

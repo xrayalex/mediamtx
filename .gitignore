@@ -10,4 +10,5 @@
 # Dockerfile snippets and entrypoint scripts under deploy/ ARE tracked.
 /deploy/vendor/platecore/x86/
 /deploy/vendor/platecore/arm64/
+/deploy/vendor/platecore/aarch64/
 /deploy/vendor/platecore/license-server-manager_*

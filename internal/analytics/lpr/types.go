@@ -20,6 +20,7 @@ type Config struct {
 	PlateSizeMax [2]float32 `json:"plate_size_max"` // w,h in 0..1
 	Crop         int        `json:"crop"`           // 1 = thumbnail is plate crop (default 0 → full frame)
 	Draw         int        `json:"draw"`           // 1 = overlay bbox+text on thumbnail
+	GPU          int        `json:"gpu"`            // -1 = CPU (default), 0..N = CUDA device index (x86 only; ignored on PLATFORM_RK)
 }
 
 // EventPayload is the JSON shape emitted as Event.Payload.
@@ -38,8 +39,10 @@ type Config struct {
 //
 // Layout mirrors PlateCore's layout int (0 = rectangle, 1 = square).
 //
-// Speed is the value reported by PlateCore. Units per SDK 1.2.2 docs:
-// metres per second (when calibration is available); 0 when not.
+// Speed is the value reported by PlateCore: average speed of the
+// tracked object in **kilometres per hour**. The SDK docs flag 0 as
+// "unreliable / not enough data", typically meaning the tracker did
+// not accumulate enough frames or the scene lacks calibration.
 type EventPayload struct {
 	Plate       string     `json:"plate"`
 	PlateFull   string     `json:"plate_full,omitempty"`
@@ -53,5 +56,5 @@ type EventPayload struct {
 	DirectionLR int        `json:"direction_lr"` // raw: -1 stationary, 0 left, 1 right
 	DirectionUD int        `json:"direction_ud"` // raw: -1 stationary, 0 up,   1 down
 	Layout      string     `json:"layout"`       // "rectangle" | "square" | "unknown"
-	Speed       float32    `json:"speed"`        // metres per second (PlateCore SDK 1.2.2)
+	Speed       float32    `json:"speed"`        // km/h, see field docstring above
 }

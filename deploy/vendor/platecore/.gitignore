@@ -1,6 +1,7 @@
 # Native vendor files are distributed out of band; do not commit them.
 /x86/
 /arm64/
+/aarch64/
 *.so
 *.so.*
 license-server-manager_*
