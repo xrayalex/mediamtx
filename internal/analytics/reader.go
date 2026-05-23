@@ -48,6 +48,12 @@ type Reader struct {
 
 	jobs chan *frameJob
 
+	// streamStart is the wall-clock timestamp of the first decoded
+	// frame; tsKey for every frame is computed as
+	// (ntp - streamStart) milliseconds, masked to 31 bits.
+	// Zero until the first frame arrives.
+	streamStart time.Time
+
 	closed    chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup
@@ -246,10 +252,21 @@ func (r *Reader) handleJob(job *frameJob) {
 		return
 	}
 
+	// Anchor the millisecond timeline at the first frame so tsKey
+	// starts at 1 and grows monotonically. Offset by one millisecond
+	// behind the first frame so its tsKey is non-zero (zero is
+	// reserved for "no key" in FrameStore.tsIndex).
+	if r.streamStart.IsZero() {
+		r.streamStart = job.ntp.Add(-time.Millisecond)
+	}
+	tsKey := uint32(job.ntp.Sub(r.streamStart).Milliseconds() & 0x7FFFFFFF)
+
 	// Snapshot the frame into the per-camera ring so async publish
 	// workers can fetch the BGR bytes after Module.Process has long
-	// returned and the decoder has reused its output buffer.
-	ref := r.store.Put(width, height, bgr, job.ntp)
+	// returned and the decoder has reused its output buffer. tsKey
+	// goes into the secondary index so modules can resolve an engine-
+	// echoed timestamp back to a FrameRef.
+	ref := r.store.Put(width, height, bgr, job.ntp, tsKey)
 
 	frame := &Frame{
 		Data:      bgr,
@@ -259,6 +276,7 @@ func (r *Reader) handleJob(job *frameJob) {
 		CameraID:  r.CameraID,
 		Ref:       ref,
 		Store:     r.store,
+		TSKey:     tsKey,
 	}
 
 	for _, m := range r.Modules {

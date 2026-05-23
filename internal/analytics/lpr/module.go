@@ -79,17 +79,28 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 		return nil, nil
 	}
 
-	// We pass the ring-buffer frame ID as the PlateCore "timestamp" so
-	// PlateCore echoes it back via processing_result.timestamp. That
-	// echoed value tells us *which source frame* the bbox refers to —
-	// which in stream=1 can be several iterations behind the most
-	// recent submission because the tracker accumulates detections
-	// before firing the event. We then key FrameRef off it to fetch
-	// the matching BGR from the ring on the publisher worker.
+	// Hand PlateCore the real monotonic millisecond axis (Frame.TSKey,
+	// already wrapped into 31 bits by the reader). Two consequences:
 	//
-	// The low 31 bits are enough headroom (frame IDs wrap after 2^31
-	// frames; at 10 fps that is ~6.8 years per camera).
-	ts := int(frame.Ref.ID & 0x7fffffff)
+	//   1. PlateCore's internal tracker sees consecutive frames spaced
+	//      by ~ms instead of by "+1 frame", so the speed field on
+	//      processing_result becomes meaningful (in the units the SDK
+	//      uses for its own time math) rather than a per-frame delta.
+	//
+	//   2. PlateCore echoes the timestamp back in
+	//      processing_result.timestamp; we look it up in the reader's
+	//      FrameStore.tsIndex to recover the matching FrameRef. MODE_LEAVE
+	//      can echo a timestamp older than the ring depth, in which case
+	//      the lookup yields a zero ref — that's fine: r.Thumbnail
+	//      (populated via platecore_to_jpeg from PlateCore's internal
+	//      best-frame buffer) is always present in MODE_LEAVE and wins
+	//      the thumbnail path anyway.
+	//
+	// 31-bit wrap: 0x7FFFFFFF ms ≈ 24.85 days of continuous stream. A
+	// long-running reader past that horizon will see PlateCore's
+	// tracker reset itself on the wrap; operational restart resets
+	// streamStart and is the documented remedy.
+	ts := int(frame.TSKey & 0x7FFFFFFF)
 
 	results, err := m.engine.Process(
 		frame.Data, frame.Width, frame.Height, ts, m.cfg.Crop, m.cfg.Draw,
@@ -107,13 +118,17 @@ func (m *Module) Process(frame *analytics.Frame) ([]analytics.Event, error) {
 	events := make([]analytics.Event, 0, len(results))
 	for _, r := range results {
 		// sourceRef is the ring-buffer handle of the *frame the bbox
-		// refers to*, not the current submission. We derive it from
-		// r.Timestamp (PlateCore's echo of our input timestamp).
-		// MODE_LEAVE returns timestamp = the best frame in the track,
-		// which is usually older than ring depth — in that case the
-		// publisher's Get will report eviction and Thumbnail
-		// (populated via platecore_to_jpeg) wins anyway.
-		sourceRef := analytics.FrameRef{ID: r.Timestamp}
+		// refers to*, not the current submission. We derive it by
+		// looking up the echoed PlateCore timestamp (which we fed in
+		// as Frame.TSKey above) against the reader's FrameStore
+		// secondary index. MODE_LEAVE may echo a timestamp older than
+		// ring depth → LookupByTSKey returns the zero ref; publisher
+		// detects that and falls back to the inline Thumbnail
+		// (always populated in MODE_LEAVE via platecore_to_jpeg).
+		var sourceRef analytics.FrameRef
+		if frame.Store != nil {
+			sourceRef = frame.Store.LookupByTSKey(uint32(r.Timestamp))
+		}
 
 		ev := analytics.Event{
 			ModuleName: "lpr",

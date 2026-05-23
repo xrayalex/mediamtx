@@ -32,6 +32,18 @@ type Frame struct {
 	Ref FrameRef
 	// Store is the FrameStore that issued Ref. nil iff Ref.IsZero().
 	Store *FrameStore
+
+	// TSKey is the monotonic 32-bit handle (milliseconds since the
+	// reader's stream-start) the FrameStore indexed this frame under.
+	// Modules that hand an opaque integer timestamp to an external
+	// engine (PlateCore, etc.) should pass TSKey rather than Ref.ID
+	// so the engine sees a real time axis (and computes speed
+	// correctly) while remaining able to resolve the echoed timestamp
+	// back to a FrameRef via FrameStore.LookupByTSKey.
+	//
+	// Always non-zero when Ref is non-zero: the reader bumps the very
+	// first frame to tsKey = 1 ms to keep zero reserved for "no key".
+	TSKey uint32
 }
 
 // Event is the result of a module recognising something in a Frame.
